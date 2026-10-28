@@ -1,5 +1,11 @@
 # @ai-sdk/openai
 
+## 4.0.105
+
+### Patch Changes
+
+- 47b1d8b: feat(openai): send native JSON input and prompt cache keys to Decisions
+
 ## 4.0.104
 
 ### Patch Changes
