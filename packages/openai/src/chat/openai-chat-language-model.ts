@@ -26,7 +26,7 @@ import {
   type ParseResult,
 } from '@ai-sdk/provider-utils';
 import { openaiFailedResponseHandler } from '../openai-error';
-import { getOpenAILanguageModelCapabilities } from '../openai-language-model-capabilities';
+import { getOpenAILanguageModelEntry } from '../openai-model-catalog';
 import {
   createOpenAIProviderStreamError,
   throwIfOpenAIStreamErrorBeforeOutput,
@@ -119,7 +119,10 @@ export class OpenAIChatLanguageModel implements LanguageModelV4 {
         schema: openaiLanguageModelChatOptions,
       })) ?? {};
 
-    const modelCapabilities = getOpenAILanguageModelCapabilities(this.modelId);
+    const {
+      capabilities: { language: modelCapabilities },
+      requestConfig: { language: modelRequestConfig },
+    } = getOpenAILanguageModelEntry(this.modelId);
 
     // AI SDK reasoning values map directly to the OpenAI reasoning values.
     let resolvedReasoningEffort =
@@ -128,21 +131,20 @@ export class OpenAIChatLanguageModel implements LanguageModelV4 {
 
     if (
       resolvedReasoningEffort != null &&
-      modelCapabilities.supportedReasoningEfforts != null &&
-      !modelCapabilities.supportedReasoningEfforts.includes(
-        resolvedReasoningEffort,
-      )
+      modelCapabilities.reasoning.efforts != null &&
+      !modelCapabilities.reasoning.efforts.includes(resolvedReasoningEffort)
     ) {
       warnings.push({
         type: 'unsupported',
         feature: 'reasoningEffort',
-        details: `${this.modelId} only supports the following reasoning efforts: ${modelCapabilities.supportedReasoningEfforts.join(', ')}`,
+        details: `${this.modelId} only supports the following reasoning efforts: ${modelCapabilities.reasoning.efforts.join(', ')}`,
       });
       resolvedReasoningEffort = undefined;
     }
 
     const isReasoningModel =
-      openaiOptions.forceReasoning ?? modelCapabilities.isReasoningModel;
+      openaiOptions.forceReasoning ??
+      modelCapabilities.reasoning.support === true;
 
     if (topK != null) {
       warnings.push({ type: 'unsupported', feature: 'topK' });
@@ -166,7 +168,7 @@ export class OpenAIChatLanguageModel implements LanguageModelV4 {
           openaiOptions.systemMessageMode ??
           (isReasoningModel
             ? 'developer'
-            : modelCapabilities.systemMessageMode),
+            : modelRequestConfig.systemMessageMode),
       },
     );
 
@@ -246,7 +248,7 @@ export class OpenAIChatLanguageModel implements LanguageModelV4 {
     };
 
     if (
-      modelCapabilities.supportedReasoningEfforts != null &&
+      !modelCapabilities.promptCache.retention &&
       baseArgs.prompt_cache_retention != null
     ) {
       baseArgs.prompt_cache_retention = undefined;
@@ -265,7 +267,7 @@ export class OpenAIChatLanguageModel implements LanguageModelV4 {
       //  https://platform.openai.com/docs/guides/latest-model#gpt-5-1-parameter-compatibility
       if (
         resolvedReasoningEffort !== 'none' ||
-        !modelCapabilities.supportsNonReasoningParameters
+        modelCapabilities.reasoning.sampling !== 'reasoning-effort-none'
       ) {
         if (baseArgs.temperature != null) {
           baseArgs.temperature = undefined;
@@ -331,10 +333,7 @@ export class OpenAIChatLanguageModel implements LanguageModelV4 {
         }
         baseArgs.max_tokens = undefined;
       }
-    } else if (
-      this.modelId.startsWith('gpt-4o-search-preview') ||
-      this.modelId.startsWith('gpt-4o-mini-search-preview')
-    ) {
+    } else if (!modelCapabilities.endpoints.chat.temperatureWithoutReasoning) {
       if (baseArgs.temperature != null) {
         baseArgs.temperature = undefined;
         warnings.push({
@@ -349,7 +348,7 @@ export class OpenAIChatLanguageModel implements LanguageModelV4 {
     // Validate flex processing support
     if (
       openaiOptions.serviceTier === 'flex' &&
-      !modelCapabilities.supportsFlexProcessing
+      !modelCapabilities.serviceTiers.flex
     ) {
       warnings.push({
         type: 'unsupported',
@@ -364,7 +363,7 @@ export class OpenAIChatLanguageModel implements LanguageModelV4 {
     if (
       (openaiOptions.serviceTier === 'priority' ||
         openaiOptions.serviceTier === 'fast') &&
-      !modelCapabilities.supportsPriorityProcessing
+      !modelCapabilities.serviceTiers.priority
     ) {
       warnings.push({
         type: 'unsupported',
